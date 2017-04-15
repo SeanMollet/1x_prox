@@ -23,6 +23,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <linux/if_packet.h>
 #include <linux/if_ether.h>
 #include <linux/filter.h>
@@ -32,8 +33,15 @@
 #include <fcntl.h>
 
 
+/*
 char wan_ifname[] = "eth0\0";
+char wan_vlanifname[] = "eth0.0\0";
 char int_ifname[] = "eth1\0";
+*/
+
+char wan_ifname[IFNAMSIZ+1];
+char wan_vlanifname[IFNAMSIZ+1];
+char int_ifname[IFNAMSIZ+1];
 
 struct sockaddr_ll wan_ll;
 struct sockaddr_ll int_ll;
@@ -123,6 +131,30 @@ int bind_if( const char *ifname, struct sockaddr_ll *i_ll, int *sock, const char
     return 0;
 }
 
+int checkIP(char *interface)
+{
+ int fd,result;
+ struct ifreq ifr;
+
+ fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+ /* I want to get an IPv4 IP address */
+ ifr.ifr_addr.sa_family = AF_INET;
+
+ strncpy(ifr.ifr_name, interface, IFNAMSIZ-1);
+ if(ioctl(fd, SIOCGIFADDR, &ifr)==0){
+  result = 1;
+ }
+ else{
+  //For debugging
+  //printf("ioctl failed and returned error: %s \n",strerror(errno));
+  result = 0;
+ }
+
+ close(fd);
+ return result;
+}
+
 int mainloop( int set_wan, int set_int )
 {
 #define buf_sz 2000
@@ -137,6 +169,9 @@ int mainloop( int set_wan, int set_int )
     short ifr2_flags;
     unsigned char *mac;
 
+    struct timeval select_timeout;
+    select_timeout.tv_sec = 5;
+    
     if( bind_if( wan_ifname, &wan_ll, &wan_sock, "ONT/wan" ) < 0 )
     {
         printf("ONT sock bind failed, erroring out!\n");
@@ -153,13 +188,13 @@ int mainloop( int set_wan, int set_int )
     max_sock = ( int_sock > wan_sock ? int_sock : wan_sock) + 1;
     //printf("socks: %d/%d/%d\n", wan_sock, int_sock, max_sock);
 
-    while( 1 )
+    while( !checkIP(wan_vlanifname) )
     {
         FD_ZERO(&rfds);
         FD_SET(wan_sock, &rfds);
         FD_SET(int_sock, &rfds);
 
-        retval = select( (max_sock), &rfds, NULL, NULL, NULL );
+        retval = select( (max_sock), &rfds, NULL, NULL, &select_timeout );
 
         if (retval == -1)
         {
@@ -167,13 +202,6 @@ int mainloop( int set_wan, int set_int )
             close( int_sock );
             close( wan_sock );
             perror("select()");
-        }
-        else if (!retval)
-        {
-            printf("select() returned empty!\n");
-            close( int_sock );
-            close( wan_sock );
-            return -2;
         }
 
         if( FD_ISSET( wan_sock, &rfds ) )
@@ -469,20 +497,35 @@ int mainloop( int set_wan, int set_int )
             }
         }
     }
-
     return 0;
 }
 
-int main()
+int main( int argc, char *argv[] )
 {
-    int retval;
+    int retval=0;
 
-    do
+    if(argc<2){
+        printf("Usage: 1x_prox <wan interface> <lan interface>\nExample: 1x_prox eth0 eth1\n");
+        return -1;
+    }
+    
+    strncpy(wan_ifname,argv[1],IFNAMSIZ);
+    strncpy(int_ifname,argv[2],IFNAMSIZ);
+    strcat(wan_vlanifname,wan_ifname);
+    strcat(wan_vlanifname,".0");
+    
+    printf("Configuring proxy between:\n");
+    printf("Wan:\t\t%s\nWan vlan:\t%s\nLan:\t\t%s\n",wan_ifname,wan_vlanifname,int_ifname);
+    
+    //Make sure we don't already have an IP on this interface
+    while(!checkIP(wan_vlanifname))
     {
         retval = mainloop( 1, 1 );
         sleep(2);
     }
-    while( 1 );
-
+    
+    if(retval==0){
+        printf("Success!\n");
+    }
     return retval;
 }
