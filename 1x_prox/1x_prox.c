@@ -75,7 +75,7 @@ int bind_if( const char *ifname, struct sockaddr_ll *i_ll, int *sock, const char
     our_mreq.mr_ifindex = i_ll->sll_ifindex;
     our_mreq.mr_type = PACKET_MR_MULTICAST;
     our_mreq.mr_alen = 6;
-    memcpy( our_mreq.mr_address, "\x01\x80\xC2\x00\x00\x03x0", 7 );
+    memcpy( our_mreq.mr_address, "\x01\x80\xC2\x00\x00\x03\x0", 7 );
 
     if( setsockopt( *sock, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &our_mreq, sizeof( our_mreq ) ) < 0 )
     {
@@ -171,6 +171,7 @@ int mainloop( int set_wan, int set_int )
 
     struct timeval select_timeout;
     select_timeout.tv_sec = 5;
+    select_timeout.tv_usec = 0;
     
     if( bind_if( wan_ifname, &wan_ll, &wan_sock, "ONT/wan" ) < 0 )
     {
